@@ -1,0 +1,39 @@
+# --- HỆ THỐNG (SYSTEM) ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- PYTHON (BACKEND) ---
+# Bỏ qua môi trường ảo (Rất quan trọng)
+backend/venv/
+venv/
+ENV/
+
+# Bỏ qua file biên dịch Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Bỏ qua biến môi trường (Bảo mật)
+backend/.env
+.env
+
+# --- NODEJS / REACT (FRONTEND) ---
+# Bỏ qua thư viện node_modules (Rất nặng, không up lên git)
+frontend/node_modules/
+node_modules/
+
+# Bỏ qua thư mục build
+frontend/dist/
+frontend/build/
+
+# Bỏ qua file log lỗi
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Bỏ qua biến môi trường frontend
+frontend/.env
+frontend/.env.local
