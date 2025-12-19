@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import base64
-import math
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,7 +19,11 @@ app.add_middleware(
 class ImageRequest(BaseModel):
     image: str
     points: List[List[float]] = []
-    action: str = "warp"
+    action: str = "detect"
+    threshold1: int = 75
+    threshold2: int = 200
+    morph_kernel: int = 5
+    resize_width: int = 600
 
 def base64_to_cv2(b64str):
     encoded_data = b64str.split(',')[1]
@@ -31,48 +34,6 @@ def cv2_to_base64(img):
     _, buffer = cv2.imencode('.jpg', img)
     return "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
 
-# --- 3D POSE ---
-def rotation_matrix_to_euler_angles(R):
-    sy = math.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
-    singular = sy < 1e-6
-    if not singular:
-        x = math.atan2(R[2, 1], R[2, 2])
-        y = math.atan2(-R[2, 0], sy)
-        z = math.atan2(R[1, 0], R[0, 0])
-    else:
-        x = math.atan2(-R[1, 2], R[1, 1])
-        y = math.atan2(-R[2, 0], sy)
-        z = 0
-    return np.array([math.degrees(x), math.degrees(y), math.degrees(z)])
-
-def calculate_3d_pose(image_size, corners):
-    try:
-        focal_length = image_size[1]
-        center = (image_size[1] / 2, image_size[0] / 2)
-        camera_matrix = np.array(
-            [[focal_length, 0, center[0]], [0, focal_length, center[1]], [0, 0, 1]], 
-            dtype="double"
-        )
-        dist_coeffs = np.zeros((4, 1))
-        object_points = np.array([
-            [0, 0, 0], [21.0, 0, 0], [21.0, 29.7, 0], [0, 29.7, 0]
-        ], dtype="double")
-
-        success, rotation_vector, translation_vector = cv2.solvePnP(
-            object_points, corners.astype("double"), camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE
-        )
-        rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
-        euler = rotation_matrix_to_euler_angles(rotation_matrix)
-        
-        return {
-            "pitch_x": round(euler[0], 2),
-            "yaw_y":   round(euler[1], 2),
-            "roll_z":  round(euler[2], 2)
-        }
-    except:
-        return {"pitch_x": 0, "yaw_y": 0, "roll_z": 0}
-
-# --- TRANSFORM ---
 def order_points(pts):
     rect = np.zeros((4, 2), dtype="float32")
     s = pts.sum(axis=1)
@@ -94,113 +55,105 @@ def four_point_transform(image, pts):
     maxHeight = max(int(heightA), int(heightB))
     dst = np.array([[0, 0], [maxWidth - 1, 0], [maxWidth - 1, maxHeight - 1], [0, maxHeight - 1]], dtype="float32")
     M = cv2.getPerspectiveTransform(rect, dst)
-    return cv2.warpPerspective(image, M, (maxWidth, maxHeight)), rect
+    return cv2.warpPerspective(image, M, (maxWidth, maxHeight))
 
-# --- CRITICAL FIX: LOGIC LỌC TRÙNG LẶP ---
-def filter_polygons(polygons):
-    if not polygons: return []
+# --- LOGIC LỌC TỨ DIỆN (MỚI) ---
+def filter_outer_polygons(candidates):
+    if not candidates: return []
     
-    # 1. Lấy thông tin bounding box
-    boxes = []
-    for poly in polygons:
-        poly_np = np.array(poly, dtype=np.int32)
-        x, y, w, h = cv2.boundingRect(poly_np)
-        cx, cy = x + w/2, y + h/2
-        area = w * h
-        boxes.append({'poly': poly, 'rect': (x,y,w,h), 'area': area, 'center': (cx, cy)})
-
-    # 2. Sắp xếp từ LỚN đến NHỎ (Quan trọng: Để xét thằng to trước)
-    boxes.sort(key=lambda b: b['area'], reverse=True)
+    # 1. Sắp xếp theo diện tích giảm dần (Cái to nhất xét trước)
+    # Tính diện tích bằng contourArea
+    candidates.sort(key=lambda p: cv2.contourArea(np.array(p, dtype=np.float32)), reverse=True)
     
     keep = []
     
-    for i in range(len(boxes)):
-        current = boxes[i]
-        is_valid = True
+    for curr in candidates:
+        curr_np = np.array(curr, dtype=np.float32)
+        curr_center = np.mean(curr_np, axis=0) # Tìm tâm hình hiện tại
+        
+        is_invalid = False
         
         for kept in keep:
-            # KIỂM TRA 1: LỒNG NHAU (CONTAINMENT)
-            # Nếu tâm của thằng hiện tại (nhỏ hơn) nằm trong thằng đã giữ (to hơn)
-            # -> Nó là văn bản con -> Bỏ
-            cx, cy = current['center']
-            kx, ky, kw, kh = kept['rect']
+            kept_np = np.array(kept, dtype=np.float32)
             
-            if (kx < cx < kx + kw) and (ky < cy < ky + kh):
-                is_valid = False
+            # KIỂM TRA 1: LỒNG NHAU (CONTAINMENT)
+            # Kiểm tra xem tâm của hình hiện tại (nhỏ hơn) có nằm trong hình đã giữ (to hơn) không
+            # cv2.pointPolygonTest trả về > 0 nếu nằm trong, < 0 nếu ngoài
+            if cv2.pointPolygonTest(kept_np, tuple(curr_center), False) >= 0:
+                is_invalid = True # Bỏ qua vì nó nằm trong hình to hơn
                 break
                 
-            # KIỂM TRA 2: QUÁ GẦN NHAU (DUPLICATE)
-            # Nếu tâm 2 thằng cách nhau < 20px -> Trùng -> Bỏ
-            dist = math.sqrt((cx - kept['center'][0])**2 + (cy - kept['center'][1])**2)
-            if dist < 20:
-                is_valid = False
+            # KIỂM TRA 2: TRÙNG LẶP (DUPLICATE)
+            # Nếu 2 hình kích thước xêm xêm nhau mà tâm lại gần nhau -> là 1 hình bị detect đè
+            kept_center = np.mean(kept_np, axis=0)
+            dist = np.linalg.norm(curr_center - kept_center)
+            
+            if dist < 20: # Nếu tâm cách nhau dưới 20px
+                is_invalid = True # Bỏ qua (vì đã giữ thằng to hơn rồi)
                 break
+        
+        if not is_invalid:
+            keep.append(curr)
+            
+    return keep
 
-        if is_valid:
-            keep.append(current)
-
-    return [k['poly'] for k in keep]
-
-# --- DETECTION LOGIC (QUAY VỀ CANNY EDGE MẠNH MẼ) ---
-def detect_all_documents(image):
-    PROCESS_H = 1000 # Giữ độ phân giải cao
-    ratio = image.shape[0] / PROCESS_H
-    image_resized = cv2.resize(image, (int(image.shape[1] / ratio), PROCESS_H))
+def find_all_documents(image, t1, t2, morph_k, width_target):
+    (h, w) = image.shape[:2]
+    ratio = width_target / float(w)
+    dim = (width_target, int(h * ratio))
+    image_resized = cv2.resize(image, dim)
     
     gray = cv2.cvtColor(image_resized, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(blurred, t1, t2)
     
-    # GaussianBlur chuẩn
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    if morph_k % 2 == 0: morph_k += 1 
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_k, morph_k))
+    closed = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel)
     
-    # Dùng Canny với ngưỡng thấp để bắt hết biên giấy
-    edged = cv2.Canny(blur, 10, 200)
-
-    # Dilation mạnh để nối liền nét đứt
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    dilated = cv2.dilate(edged, kernel, iterations=3)
+    cnts, _ = cv2.findContours(closed.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     
-    cnts, _ = cv2.findContours(dilated.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-    
-    candidates = []
+    raw_candidates = []
     img_area = image_resized.shape[0] * image_resized.shape[1]
 
     for c in cnts:
         area = cv2.contourArea(c)
-        # Lọc rác nhỏ (<0.5%) và lọc cái bảng to đùng (>90%)
-        if area < (img_area * 0.005) or area > (img_area * 0.90): 
+        if area < (img_area * 0.01) or area > (img_area * 0.98): # Lọc rác quá nhỏ hoặc viền quá to
             continue
-            
+
         peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.04 * peri, True)
-
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+        
         if len(approx) == 4 and cv2.isContourConvex(approx):
-            pts = approx.reshape(4, 2) * ratio
-            candidates.append(pts.tolist())
-
-    # Gọi bộ lọc mới
-    return filter_polygons(candidates)
+            # Lưu tọa độ đã scale về kích thước gốc
+            real_points = approx.reshape(4, 2) / ratio
+            raw_candidates.append(real_points.tolist())
+    
+    # --- GỌI HÀM LỌC ---
+    filtered_candidates = filter_outer_polygons(raw_candidates)
+            
+    return filtered_candidates, closed
 
 @app.post("/process")
 async def process_image(data: ImageRequest):
     try:
         img = base64_to_cv2(data.image)
-        h, w = img.shape[:2]
-
+        
         if data.action == "detect":
-            candidates = detect_all_documents(img)
-            return {"candidates": candidates}
+            # candidates đã được lọc sạch sẽ
+            candidates, edge_img = find_all_documents(
+                img, data.threshold1, data.threshold2, 
+                data.morph_kernel, data.resize_width
+            )
+            
+            return {
+                "candidates": candidates,
+                "edge_image": cv2_to_base64(edge_img)
+            }
 
         elif data.action == "warp":
-            if not data.points or len(data.points) != 4:
-                return {"error": "Need 4 points."}
-            
-            processed_img, ordered_pts = four_point_transform(img, data.points)
-            angles = calculate_3d_pose((h, w), ordered_pts)
-
-            return {
-                "processed_image": cv2_to_base64(processed_img),
-                "angle_info": angles
-            }
+            processed_img = four_point_transform(img, data.points)
+            return { "processed_image": cv2_to_base64(processed_img) }
             
     except Exception as e:
         return {"error": str(e)}

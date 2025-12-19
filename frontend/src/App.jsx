@@ -4,18 +4,20 @@ import './App.css';
 
 function App() {
   const [imageSrc, setImageSrc] = useState(null);
+  const [edgeImageSrc, setEdgeImageSrc] = useState(null);
   const [resultSrc, setResultSrc] = useState(null);
-  const [mode, setMode] = useState('auto');
-  const [angle, setAngle] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   
+  // States thanh trượt
+  const [threshold1, setThreshold1] = useState(75);
+  const [threshold2, setThreshold2] = useState(200);
+  const [morphKernel, setMorphKernel] = useState(5);
+  const [resizeWidth, setResizeWidth] = useState(650); // Mặc định to hơn chút cho nét
+
   const canvasRef = useRef(null);
   const [candidates, setCandidates] = useState([]); 
-  const [selectedAutoPoints, setSelectedAutoPoints] = useState([]);
-  const [manualPoints, setManualPoints] = useState([]);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragIndex, setDragIndex] = useState(-1);
 
+  // --- LOGIC GIỮ NGUYÊN ---
   const isPointInPolygon = (p, vs) => {
     let inside = false;
     for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
@@ -34,10 +36,8 @@ function App() {
       reader.onload = (evt) => {
         setImageSrc(evt.target.result);
         setResultSrc(null);
-        setAngle(null);
+        setEdgeImageSrc(null);
         setCandidates([]);
-        setSelectedAutoPoints([]);
-        setManualPoints([]);
       };
       reader.readAsDataURL(file);
     }
@@ -45,29 +45,23 @@ function App() {
 
   useEffect(() => {
     if (!imageSrc) return;
-    if (mode === 'auto') {
-        fetchCandidates();
-    } else {
-        if (manualPoints.length === 0) initManualPoints();
-    }
-  }, [mode, imageSrc]);
+    detectDocuments();
+  }, [imageSrc]); 
 
-  const initManualPoints = () => {
-      const w = canvasRef.current.width;
-      const h = canvasRef.current.height;
-      setManualPoints([
-          {x: w*0.2, y: h*0.2}, {x: w*0.8, y: h*0.2},
-          {x: w*0.8, y: h*0.8}, {x: w*0.2, y: h*0.8}
-      ]);
-  };
-
-  const fetchCandidates = async () => {
+  const detectDocuments = async () => {
       setIsLoading(true);
       try {
           const res = await axios.post('http://127.0.0.1:8000/process', {
-              image: imageSrc, action: 'detect'
+              image: imageSrc, 
+              action: 'detect',
+              threshold1: parseInt(threshold1),
+              threshold2: parseInt(threshold2),
+              morph_kernel: parseInt(morphKernel),
+              resize_width: parseInt(resizeWidth)
           });
-          setCandidates(res.data.candidates || []);
+          
+          if (res.data.candidates) setCandidates(res.data.candidates);
+          if (res.data.edge_image) setEdgeImageSrc(res.data.edge_image);
       } catch (e) { console.error(e); } 
       finally { setIsLoading(false); }
   };
@@ -77,125 +71,65 @@ function App() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const img = new Image();
-    img.src = imageSrc;
+    img.src = imageSrc; 
     
     img.onload = () => {
-        const maxWidth = 600;
+        const maxWidth = 800; // Tăng kích thước Canvas hiển thị cho dễ chọn
         const scale = maxWidth / img.width;
         canvas.width = maxWidth;
         canvas.height = img.height * scale;
         
         ctx.clearRect(0,0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const scaleX = canvas.width / img.width;
+        const scaleY = canvas.height / img.height;
 
-        if (mode === 'auto') {
-            candidates.forEach(poly => {
-                ctx.beginPath();
-                ctx.moveTo(poly[0][0]*scale, poly[0][1]*scale);
-                for(let i=1; i<4; i++) ctx.lineTo(poly[i][0]*scale, poly[i][1]*scale);
-                ctx.closePath();
-                ctx.strokeStyle = '#3498db';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 5]);
-                ctx.stroke();
-            });
-
-            if (selectedAutoPoints.length === 4) {
-                ctx.setLineDash([]);
-                ctx.beginPath();
-                ctx.moveTo(selectedAutoPoints[0].x, selectedAutoPoints[0].y);
-                selectedAutoPoints.forEach(p => ctx.lineTo(p.x, p.y));
-                ctx.closePath();
-                ctx.strokeStyle = '#2ecc71';
-                ctx.lineWidth = 3;
-                ctx.stroke();
-                ctx.fillStyle = 'rgba(46, 204, 113, 0.3)';
-                ctx.fill();
-            }
-        }
-
-        if (mode === 'manual' && manualPoints.length === 4) {
-            ctx.setLineDash([]);
+        candidates.forEach(poly => {
+            const pts = poly.map(p => ({ x: p[0]*scaleX, y: p[1]*scaleY }));
             ctx.beginPath();
-            ctx.moveTo(manualPoints[0].x, manualPoints[0].y);
-            manualPoints.forEach(p => ctx.lineTo(p.x, p.y));
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for(let i=1; i<4; i++) ctx.lineTo(pts[i].x, pts[i].y);
             ctx.closePath();
-            ctx.strokeStyle = '#f39c12';
-            ctx.lineWidth = 2;
+            
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#2ecc71'; 
+            ctx.setLineDash([5, 3]); 
             ctx.stroke();
-
-            manualPoints.forEach(p => {
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
-                ctx.fillStyle = '#e74c3c';
-                ctx.fill();
-                ctx.strokeStyle = 'white';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            });
-        }
+            ctx.fillStyle = 'rgba(46, 204, 113, 0.2)';
+            ctx.fill();
+            ctx.setLineDash([]); 
+        });
     };
-  }, [imageSrc, mode, candidates, selectedAutoPoints, manualPoints]);
+  }, [imageSrc, candidates]);
 
   const getMousePos = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const scaleX = canvasRef.current.width / rect.width;
+    const scaleY = canvasRef.current.height / rect.height;
+    return { 
+        x: (e.clientX - rect.left) * scaleX, 
+        y: (e.clientY - rect.top) * scaleY 
+    };
   };
 
-  const handleMouseDown = (e) => {
+  const handleMouseDown = async (e) => {
       e.preventDefault();
-      const pos = getMousePos(e);
-
-      if (mode === 'auto') {
-          if (candidates.length === 0) return;
-          handleClickAuto(pos);
-      } else {
-          manualPoints.forEach((p, index) => {
-              if (Math.hypot(p.x - pos.x, p.y - pos.y) < 25) {
-                  setIsDragging(true);
-                  setDragIndex(index);
-              }
-          });
-      }
-  };
-
-  const handleMouseMove = (e) => {
-      e.preventDefault();
-      if (mode === 'manual' && isDragging) {
-          const pos = getMousePos(e);
-          const x = Math.max(0, Math.min(canvasRef.current.width, pos.x));
-          const y = Math.max(0, Math.min(canvasRef.current.height, pos.y));
-          const newPts = [...manualPoints];
-          newPts[dragIndex] = {x, y};
-          setManualPoints(newPts);
-      }
-  };
-
-  const handleMouseUp = () => setIsDragging(false);
-
-  const handleClickAuto = async (clickPos) => {
-      const getImgSize = (src) => new Promise(r => {const i=new Image(); i.onload=()=>r({w:i.width}); i.src=src});
-      const size = await getImgSize(imageSrc);
-      const scale = canvasRef.current.width / size.w;
-
-      for (let poly of candidates) {
-          const canvasPoly = poly.map(p => ({ x: p[0]*scale, y: p[1]*scale }));
-          if (isPointInPolygon(clickPos, canvasPoly)) {
-              setSelectedAutoPoints(canvasPoly);
-              processWarp(poly); 
-              return;
-          }
-      }
-  };
-
-  const handleManualProcess = async () => {
-      if (manualPoints.length !== 4) return;
+      if (candidates.length === 0) return;
+      const clickPos = getMousePos(e);
+      const canvas = canvasRef.current;
       const getImgSize = (src) => new Promise(r => {const i=new Image(); i.onload=()=>r({w:i.width, h:i.height}); i.src=src});
       const size = await getImgSize(imageSrc);
-      const scaleX = size.w / canvasRef.current.width;
-      const scaleY = size.h / canvasRef.current.height;
-      const realPoints = manualPoints.map(p => [p.x * scaleX, p.y * scaleY]);
-      processWarp(realPoints);
+      const scaleX = canvas.width / size.w;
+      const scaleY = canvas.height / size.h;
+
+      for (let poly of candidates) {
+          const canvasPoly = poly.map(p => ({ x: p[0]*scaleX, y: p[1]*scaleY }));
+          if (isPointInPolygon(clickPos, canvasPoly)) {
+              processWarp(poly); 
+              return; 
+          }
+      }
   };
 
   const processWarp = async (pointsToSend) => {
@@ -204,11 +138,7 @@ function App() {
           const res = await axios.post('http://127.0.0.1:8000/process', {
               image: imageSrc, points: pointsToSend, action: 'warp'
           });
-          if (res.data.error) alert(res.data.error);
-          else {
-              setResultSrc(res.data.processed_image);
-              setAngle(res.data.angle_info);
-          }
+          setResultSrc(res.data.processed_image);
       } catch (e) { console.error(e); }
       finally { setIsLoading(false); }
   };
@@ -216,69 +146,92 @@ function App() {
   return (
     <div className="app-container">
       <header className="header">
-          <h1 className="title">Project 1</h1>
-          <p className="subtitle">Canny Edge Detection & 3D Pose Estimation</p>
+          <h1 className="title">Smart Document Scanner</h1>
+          <p className="subtitle">Project 2: Computer Vision Final</p>
       </header>
 
-      <div className="controls-card">
-          <div className="file-input-wrapper">
-            <input className="file-input" type="file" onChange={handleFileChange} accept="image/*" />
-          </div>
+      {/* --- PHẦN ĐIỀU KHIỂN ĐÃ ĐƯỢC TÁCH --- */}
+      <div className="control-panel">
           
-          <div className="button-group">
-              <button onClick={() => setMode('auto')} className={`btn btn-auto ${mode==='auto'?'active':''}`}>
-                  Auto Detect
-              </button>
-              <button onClick={() => setMode('manual')} className={`btn btn-manual ${mode==='manual'?'active':''}`}>
-                  Manual
-              </button>
+          {/* 1. Khu vực Upload (Luôn hiển thị) */}
+          <div className="upload-section">
+             <label className="upload-label">
+                Upload Image
+                <input className="file-input" type="file" onChange={handleFileChange} accept="image/*" />
+             </label>
           </div>
-          
-          {mode === 'manual' && (
-              <button onClick={handleManualProcess} disabled={isLoading} className="btn btn-process">
-                  {isLoading ? "Processing..." : "EXECUTE"}
-              </button>
+
+          {imageSrc && (
+              <div className="control-grid">
+                  {/* CỘT TRÁI: THANH CHỈNH SỬA */}
+                  <div className="sliders-column">
+                      <h3 className="column-title">Parameters Tuning</h3>
+                      
+                      <div className="slider-group">
+                          <label>Threshold 1 (Min): <strong>{threshold1}</strong></label>
+                          <input type="range" min="0" max="255" value={threshold1} 
+                            onChange={(e) => setThreshold1(e.target.value)} onMouseUp={detectDocuments} />
+                      </div>
+                      
+                      <div className="slider-group">
+                          <label>Threshold 2 (Max): <strong>{threshold2}</strong></label>
+                          <input type="range" min="0" max="255" value={threshold2} 
+                            onChange={(e) => setThreshold2(e.target.value)} onMouseUp={detectDocuments} />
+                      </div>
+
+                      <div className="slider-group">
+                          <label>Morph Kernel (Độ dày nét): <strong>{morphKernel}</strong></label>
+                          <input type="range" min="1" max="21" step="2" value={morphKernel} 
+                            onChange={(e) => setMorphKernel(e.target.value)} onMouseUp={detectDocuments} />
+                      </div>
+
+                      <div className="slider-group">
+                          <label>Resize Width (Speed/Detail): <strong>{resizeWidth}</strong></label>
+                          <input type="range" min="300" max="1000" step="50" value={resizeWidth} 
+                            onChange={(e) => setResizeWidth(e.target.value)} onMouseUp={detectDocuments} />
+                      </div>
+
+                      <div className="status-message">
+                          Found <span className="highlight-count">{candidates.length}</span> documents.
+                      </div>
+                  </div>
+
+                  {/* CỘT PHẢI: PREVIEW TO ĐÙNG */}
+                  <div className="preview-column">
+                      <h3 className="column-title">Edge Detection Preview</h3>
+                      <div className="edge-preview-box">
+                          {edgeImageSrc ? (
+                              <img src={edgeImageSrc} alt="Edge Debug" />
+                          ) : (
+                              <p>Loading preview...</p>
+                          )}
+                      </div>
+                      <p className="hint-text">Adjust sliders until document edges are clear and connected.</p>
+                  </div>
+              </div>
           )}
       </div>
 
+      {/* --- PHẦN WORKSPACE (GIỮ NGUYÊN LOGIC, CHỈNH LẠI CSS) --- */}
       <div className="workspace">
-          <div className="card-box">
-              <h3 className="card-title">Input ({mode.toUpperCase()})</h3>
-              <div className="canvas-wrapper">
-                <canvas 
-                    ref={canvasRef}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    className={mode === 'auto' ? 'canvas-mode-auto' : 'canvas-mode-manual'}
-                />
-              </div>
-              <p className="instruction-text">
-                  {mode === 'auto' 
-                      ? `Found ${candidates.length} objects. Click to warp.` 
-                      : 'Drag points to corners.'}
-              </p>
-          </div>
+          {imageSrc && (
+            <div className="card-box">
+                <h3 className="card-title">1. Select Document (Click Green Box)</h3>
+                <div className="canvas-wrapper">
+                    <canvas 
+                        ref={canvasRef}
+                        onMouseDown={handleMouseDown}
+                        className="canvas-interactive"
+                    />
+                </div>
+            </div>
+          )}
 
           {resultSrc && (
               <div className="card-box">
-                  <h3 className="card-title">Result</h3>
+                  <h3 className="card-title">2. Scanned Result</h3>
                   <img src={resultSrc} className="result-img" alt="Result" />
-                  
-                  {angle && (
-                    <div className="angle-container">
-                        <div className="angle-header">3D Pose</div>
-                        <div className="badge badge-roll">
-                            <span>Roll</span> <strong>{angle.roll_z}°</strong>
-                        </div>
-                        <div className="badge badge-pitch">
-                            <span>Pitch</span> <strong>{angle.pitch_x}°</strong>
-                        </div>
-                        <div className="badge badge-yaw">
-                            <span>Yaw</span> <strong>{angle.yaw_y}°</strong>
-                        </div>
-                    </div>
-                  )}
+                  <a href={resultSrc} download="scanned_doc.jpg" className="btn-download">Download JPG</a>
               </div>
           )}
       </div>
