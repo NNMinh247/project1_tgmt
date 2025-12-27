@@ -27,7 +27,6 @@ Mở terminal và trỏ vào thư mục `backend`:
 ```bash
 cd backend
 
-# Tạo môi trường ảo (Khuyến nghị)
 python -m venv venv
 # Kích hoạt môi trường:
 # - Windows:

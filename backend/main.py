@@ -57,39 +57,31 @@ def four_point_transform(image, pts):
     M = cv2.getPerspectiveTransform(rect, dst)
     return cv2.warpPerspective(image, M, (maxWidth, maxHeight))
 
-# --- LOGIC LỌC TỨ DIỆN (MỚI) ---
 def filter_outer_polygons(candidates):
     if not candidates: return []
-    
-    # 1. Sắp xếp theo diện tích giảm dần (Cái to nhất xét trước)
-    # Tính diện tích bằng contourArea
+
     candidates.sort(key=lambda p: cv2.contourArea(np.array(p, dtype=np.float32)), reverse=True)
     
     keep = []
     
     for curr in candidates:
         curr_np = np.array(curr, dtype=np.float32)
-        curr_center = np.mean(curr_np, axis=0) # Tìm tâm hình hiện tại
+        curr_center = np.mean(curr_np, axis=0) 
         
         is_invalid = False
         
         for kept in keep:
             kept_np = np.array(kept, dtype=np.float32)
             
-            # KIỂM TRA 1: LỒNG NHAU (CONTAINMENT)
-            # Kiểm tra xem tâm của hình hiện tại (nhỏ hơn) có nằm trong hình đã giữ (to hơn) không
-            # cv2.pointPolygonTest trả về > 0 nếu nằm trong, < 0 nếu ngoài
             if cv2.pointPolygonTest(kept_np, tuple(curr_center), False) >= 0:
-                is_invalid = True # Bỏ qua vì nó nằm trong hình to hơn
+                is_invalid = True 
                 break
                 
-            # KIỂM TRA 2: TRÙNG LẶP (DUPLICATE)
-            # Nếu 2 hình kích thước xêm xêm nhau mà tâm lại gần nhau -> là 1 hình bị detect đè
             kept_center = np.mean(kept_np, axis=0)
             dist = np.linalg.norm(curr_center - kept_center)
             
-            if dist < 20: # Nếu tâm cách nhau dưới 20px
-                is_invalid = True # Bỏ qua (vì đã giữ thằng to hơn rồi)
+            if dist < 20:
+                is_invalid = True 
                 break
         
         if not is_invalid:
@@ -118,7 +110,7 @@ def find_all_documents(image, t1, t2, morph_k, width_target):
 
     for c in cnts:
         area = cv2.contourArea(c)
-        if area < (img_area * 0.01) or area > (img_area * 0.98): # Lọc rác quá nhỏ hoặc viền quá to
+        if area < (img_area * 0.01) or area > (img_area * 0.98):
             continue
 
         peri = cv2.arcLength(c, True)
@@ -129,7 +121,6 @@ def find_all_documents(image, t1, t2, morph_k, width_target):
             real_points = approx.reshape(4, 2) / ratio
             raw_candidates.append(real_points.tolist())
     
-    # --- GỌI HÀM LỌC ---
     filtered_candidates = filter_outer_polygons(raw_candidates)
             
     return filtered_candidates, closed
