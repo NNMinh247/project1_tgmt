@@ -10,7 +10,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,14 +35,18 @@ def cv2_to_base64(img):
     return "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
 
 def order_points(pts):
-    rect = np.zeros((4, 2), dtype="float32")
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-    diff = np.diff(pts, axis=1)
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
-    return rect
+    xSorted = pts[np.argsort(pts[:, 0]), :]
+
+    leftMost = xSorted[:2, :]
+    rightMost = xSorted[2:, :]
+
+    leftMost = leftMost[np.argsort(leftMost[:, 1]), :]
+    (tl, bl) = leftMost
+
+    rightMost = rightMost[np.argsort(rightMost[:, 1]), :]
+    (tr, br) = rightMost
+
+    return np.array([tl, tr, br, bl], dtype="float32")
 
 def four_point_transform(image, pts):
     rect = order_points(np.array(pts, dtype="float32"))
@@ -117,7 +121,6 @@ def find_all_documents(image, t1, t2, morph_k, width_target):
         approx = cv2.approxPolyDP(c, 0.02 * peri, True)
         
         if len(approx) == 4 and cv2.isContourConvex(approx):
-            # Lưu tọa độ đã scale về kích thước gốc
             real_points = approx.reshape(4, 2) / ratio
             raw_candidates.append(real_points.tolist())
     
@@ -131,7 +134,6 @@ async def process_image(data: ImageRequest):
         img = base64_to_cv2(data.image)
         
         if data.action == "detect":
-            # candidates đã được lọc sạch sẽ
             candidates, edge_img = find_all_documents(
                 img, data.threshold1, data.threshold2, 
                 data.morph_kernel, data.resize_width

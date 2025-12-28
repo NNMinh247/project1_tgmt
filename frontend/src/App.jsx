@@ -8,16 +8,14 @@ function App() {
   const [resultSrc, setResultSrc] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   
-  // States thanh trượt
   const [threshold1, setThreshold1] = useState(75);
   const [threshold2, setThreshold2] = useState(200);
   const [morphKernel, setMorphKernel] = useState(5);
-  const [resizeWidth, setResizeWidth] = useState(650); // Mặc định to hơn chút cho nét
+  const [resizeWidth, setResizeWidth] = useState(650);
 
   const canvasRef = useRef(null);
   const [candidates, setCandidates] = useState([]); 
 
-  // --- LOGIC GIỮ NGUYÊN ---
   const isPointInPolygon = (p, vs) => {
     let inside = false;
     for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
@@ -74,7 +72,7 @@ function App() {
     img.src = imageSrc; 
     
     img.onload = () => {
-        const maxWidth = 800; // Tăng kích thước Canvas hiển thị cho dễ chọn
+        const maxWidth = 800;
         const scale = maxWidth / img.width;
         canvas.width = maxWidth;
         canvas.height = img.height * scale;
@@ -147,13 +145,11 @@ function App() {
     <div className="app-container">
       <header className="header">
           <h1 className="title">Smart Document Scanner</h1>
-          <p className="subtitle">Project 2: Computer Vision Final</p>
+          <p className="subtitle">Project 2:</p>
       </header>
 
-      {/* --- PHẦN ĐIỀU KHIỂN ĐÃ ĐƯỢC TÁCH --- */}
       <div className="control-panel">
           
-          {/* 1. Khu vực Upload (Luôn hiển thị) */}
           <div className="upload-section">
              <label className="upload-label">
                 Upload Image
@@ -163,30 +159,29 @@ function App() {
 
           {imageSrc && (
               <div className="control-grid">
-                  {/* CỘT TRÁI: THANH CHỈNH SỬA */}
                   <div className="sliders-column">
                       <h3 className="column-title">Parameters Tuning</h3>
                       
                       <div className="slider-group">
-                          <label>Threshold 1 (Min): <strong>{threshold1}</strong></label>
+                          <label>Threshold 1: <strong>{threshold1}</strong></label>
                           <input type="range" min="0" max="255" value={threshold1} 
                             onChange={(e) => setThreshold1(e.target.value)} onMouseUp={detectDocuments} />
                       </div>
                       
                       <div className="slider-group">
-                          <label>Threshold 2 (Max): <strong>{threshold2}</strong></label>
+                          <label>Threshold 2: <strong>{threshold2}</strong></label>
                           <input type="range" min="0" max="255" value={threshold2} 
                             onChange={(e) => setThreshold2(e.target.value)} onMouseUp={detectDocuments} />
                       </div>
 
                       <div className="slider-group">
-                          <label>Morph Kernel (Độ dày nét): <strong>{morphKernel}</strong></label>
+                          <label>Morph Kernel: <strong>{morphKernel}</strong></label>
                           <input type="range" min="1" max="21" step="2" value={morphKernel} 
                             onChange={(e) => setMorphKernel(e.target.value)} onMouseUp={detectDocuments} />
                       </div>
 
                       <div className="slider-group">
-                          <label>Resize Width (Speed/Detail): <strong>{resizeWidth}</strong></label>
+                          <label>Resize Width: <strong>{resizeWidth}</strong></label>
                           <input type="range" min="300" max="1000" step="50" value={resizeWidth} 
                             onChange={(e) => setResizeWidth(e.target.value)} onMouseUp={detectDocuments} />
                       </div>
@@ -196,7 +191,6 @@ function App() {
                       </div>
                   </div>
 
-                  {/* CỘT PHẢI: PREVIEW TO ĐÙNG */}
                   <div className="preview-column">
                       <h3 className="column-title">Edge Detection Preview</h3>
                       <div className="edge-preview-box">
@@ -206,17 +200,16 @@ function App() {
                               <p>Loading preview...</p>
                           )}
                       </div>
-                      <p className="hint-text">Adjust sliders until document edges are clear and connected.</p>
+                      
                   </div>
               </div>
           )}
       </div>
 
-      {/* --- PHẦN WORKSPACE (GIỮ NGUYÊN LOGIC, CHỈNH LẠI CSS) --- */}
       <div className="workspace">
           {imageSrc && (
             <div className="card-box">
-                <h3 className="card-title">1. Select Document (Click Green Box)</h3>
+                <h3 className="card-title">1. Select Document</h3>
                 <div className="canvas-wrapper">
                     <canvas 
                         ref={canvasRef}
@@ -231,7 +224,7 @@ function App() {
               <div className="card-box">
                   <h3 className="card-title">2. Scanned Result</h3>
                   <img src={resultSrc} className="result-img" alt="Result" />
-                  <a href={resultSrc} download="scanned_doc.jpg" className="btn-download">Download JPG</a>
+                  <a href={resultSrc} download="scanned_doc.jpg" className="btn-download">Download</a>
               </div>
           )}
       </div>
