@@ -24,6 +24,7 @@ class ImageRequest(BaseModel):
     threshold2: int = 200
     morph_kernel: int = 5
     resize_width: int = 600
+    filter_dist: int = 20
 
 def base64_to_cv2(b64str):
     encoded_data = b64str.split(',')[1]
@@ -61,7 +62,7 @@ def four_point_transform(image, pts):
     M = cv2.getPerspectiveTransform(rect, dst)
     return cv2.warpPerspective(image, M, (maxWidth, maxHeight))
 
-def filter_outer_polygons(candidates):
+def filter_outer_polygons(candidates, dist_threshold):
     if not candidates: return []
 
     candidates.sort(key=lambda p: cv2.contourArea(np.array(p, dtype=np.float32)), reverse=True)
@@ -84,7 +85,7 @@ def filter_outer_polygons(candidates):
             kept_center = np.mean(kept_np, axis=0)
             dist = np.linalg.norm(curr_center - kept_center)
             
-            if dist < 20:
+            if dist < dist_threshold:
                 is_invalid = True 
                 break
         
@@ -93,7 +94,7 @@ def filter_outer_polygons(candidates):
             
     return keep
 
-def find_all_documents(image, t1, t2, morph_k, width_target):
+def find_all_documents(image, t1, t2, morph_k, width_target, filter_dist):
     (h, w) = image.shape[:2]
     ratio = width_target / float(w)
     dim = (width_target, int(h * ratio))
@@ -104,7 +105,7 @@ def find_all_documents(image, t1, t2, morph_k, width_target):
     edged = cv2.Canny(blurred, t1, t2)
     
     if morph_k % 2 == 0: morph_k += 1 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_k, morph_k))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (morph_k, morph_k)) #MORPH_CROSS
     closed = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, kernel)
     
     cnts, _ = cv2.findContours(closed.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -118,13 +119,13 @@ def find_all_documents(image, t1, t2, morph_k, width_target):
             continue
 
         peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True) #Ramer–Douglas–Peucker_algorithm
         
         if len(approx) == 4 and cv2.isContourConvex(approx):
             real_points = approx.reshape(4, 2) / ratio
             raw_candidates.append(real_points.tolist())
     
-    filtered_candidates = filter_outer_polygons(raw_candidates)
+    filtered_candidates = filter_outer_polygons(raw_candidates, filter_dist)
             
     return filtered_candidates, closed
 
@@ -136,7 +137,8 @@ async def process_image(data: ImageRequest):
         if data.action == "detect":
             candidates, edge_img = find_all_documents(
                 img, data.threshold1, data.threshold2, 
-                data.morph_kernel, data.resize_width
+                data.morph_kernel, data.resize_width,
+                data.filter_dist
             )
             
             return {

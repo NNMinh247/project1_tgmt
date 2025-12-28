@@ -12,6 +12,7 @@ function App() {
   const [threshold2, setThreshold2] = useState(200);
   const [morphKernel, setMorphKernel] = useState(5);
   const [resizeWidth, setResizeWidth] = useState(650);
+  const [filterDist, setFilterDist] = useState(20);
 
   const canvasRef = useRef(null);
   const [candidates, setCandidates] = useState([]); 
@@ -55,7 +56,8 @@ function App() {
               threshold1: parseInt(threshold1),
               threshold2: parseInt(threshold2),
               morph_kernel: parseInt(morphKernel),
-              resize_width: parseInt(resizeWidth)
+              resize_width: parseInt(resizeWidth),
+              filter_dist: parseInt(filterDist)
           });
           
           if (res.data.candidates) setCandidates(res.data.candidates);
@@ -184,6 +186,12 @@ function App() {
                           <label>Resize Width: <strong>{resizeWidth}</strong></label>
                           <input type="range" min="300" max="1000" step="50" value={resizeWidth} 
                             onChange={(e) => setResizeWidth(e.target.value)} onMouseUp={detectDocuments} />
+                      </div>
+
+                      <div className="slider-group">
+                          <label>Duplicate Filter: <strong>{filterDist}</strong></label>
+                          <input type="range" min="0" max="100" value={filterDist} 
+                            onChange={(e) => setFilterDist(e.target.value)} onMouseUp={detectDocuments} />
                       </div>
 
                       <div className="status-message">
